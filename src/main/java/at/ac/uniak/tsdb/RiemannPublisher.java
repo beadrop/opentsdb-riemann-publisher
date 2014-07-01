@@ -12,11 +12,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.Set;
+import java.util.HashSet;
+import java.util.Collection;
 import java.lang.Math;
 import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
 import java.io.IOException;
 import com.aphyr.riemann.client.RiemannClient;
+import com.aphyr.riemann.client.EventDSL;
 import org.jboss.netty.channel.DefaultChannelFuture;
 
 public class RiemannPublisher extends RTPublisher {
@@ -26,6 +30,10 @@ public class RiemannPublisher extends RTPublisher {
   private int riemannPort;
   private RiemannClient client;
   private Date lastException;
+  //keywords reserve for riemann
+  private String[] keywords = {"host","state","ttl","description"}; 
+  private EventDSL event;
+private Map clientMap = null;
 
   public void initialize(final TSDB tsdb) {
     LOG.info("initialize RiemannPublisher");
@@ -33,15 +41,25 @@ public class RiemannPublisher extends RTPublisher {
     riemannPort = tsdb.getConfig().getInt("tsd.plugin.riemann.port");
     riemannHost = tsdb.getConfig().getString("tsd.plugin.riemann.host");
 
-    try {
-      /* Set this here cause of a Bug in netty -> deadlock */
-      DefaultChannelFuture.setUseDeadLockChecker(false);
-      client = RiemannClient.tcp(new InetSocketAddress(riemannHost, riemannPort));
-      client.connect();
-      LOG.info("Successfully connected RiemannClient");
-    } catch (IOException e) {
-      LOG.error("IOException while trying to create RiemannClient");
-    }
+  String [] portArr = riemannPort.split("\\,");
+  String [] hostArr = riemannHost.split("\\,");
+  int size = portArr.length();
+  clientMap = new HashMap(size);
+  for(int i=0;i<size;i++) {
+      try {
+       
+          /* Set this here cause of a Bug in netty -> deadlock */
+          DefaultChannelFuture.setUseDeadLockChecker(false);
+        RiemannClient client = RiemannClient.tcp(new InetSocketAddress(hostArr[i], portArr[i]));
+          client.connect();
+          LOG.info("Successfully connected RiemannClient");
+        String key = ""+i;
+        clientMap.put(key,client);
+        
+      } catch (IOException e) {
+        LOG.error("IOException while trying to create RiemannClient");
+      }
+  }
 
   }
 
@@ -50,10 +68,23 @@ public class RiemannPublisher extends RTPublisher {
   }
 
   public String version() {
-    return "0.0.1";
+    return "0.0.2";
   }
 
   public void collectStats(final StatsCollector collector) {
+  }
+  
+  private Collection filter_keywords(final Map<String, String> tags) {
+      for (String keyword : keywords)  {
+          if (tags.keySet().contains(keyword)) {
+		         tags.remove(keyword);
+          }
+      }
+      return tags.values();
+  }
+
+private RiemannClient getClient(String metric) {
+        clientMap.get(""+metric.hashCode()%size);
   }
 
   public Deferred<Object> publishDataPoint(
@@ -64,20 +95,33 @@ public class RiemannPublisher extends RTPublisher {
       final byte[] tsuid) {
 
     try {
+      HashSet<String> keys = new HashSet<String>(tags.keySet()); 
+      String state = keys.contains("state") ? tags.get("state") : null;
+      Float ttl = keys.contains("ttl") ? Float.parseFloat(tags.get("ttl")) : null;
+      String hostName = keys.contains("host") ? tags.get("host") : null;
+      String description = keys.contains("description") ? tags.get("description") : null;
+      List<String> tagValues = new ArrayList<String>(filter_keywords(tags));
 
-      List<String> tagList = new ArrayList<String>(tags.values());
-
+client = getClient();
       if (client.isConnected()) {
-        client.event().
-          host(tags.get("host")).
-          service(metric).
-          metric(value).
-          tags(tagList).
-          send();
+	      event = client.event();
+	      event.host(hostName).
+		      service(metric).
+		      metric(value);
+	      event.tags(tagValues);
+	      if (ttl != null) {
+		      event.ttl(ttl);
+	      }
+	      if (state != null) {
+		      event.state(state);
+	      }
+	      if (description != null) {
+		      event.description(description);
+	      }
+	      event.send();
       } else {
         reconnectClient();
       }
-
     } catch (Throwable t) {
       LOG.error("Exception in RiemannPublisher publishDataPoint", t);
     }
@@ -92,16 +136,30 @@ public class RiemannPublisher extends RTPublisher {
       final byte[] tsuid) {
 
     try {
+      HashSet<String> keys = new HashSet<String>(tags.keySet()); 
+      String state = keys.contains("state") ? tags.get("state") : null;
+      Float ttl = keys.contains("ttl") ? Float.parseFloat(tags.get("ttl")) : null;
+      String hostName = keys.contains("host") ? tags.get("host") : null;
+      String description = keys.contains("description") ? tags.get("description") : null;
+      List<String> tagValues = new ArrayList<String>(filter_keywords(tags));
 
-      List<String> tagList = new ArrayList<String>(tags.values());
-
+client = getClient();
       if (client.isConnected()) {
-        client.event().
-          host(tags.get("host")).
-          service(metric).
-          metric(value).
-          tags(tagList).
-          send();
+	      event = client.event();
+	      event.host(hostName).
+		      service(metric).
+		      metric(value);
+	      event.tags(tagValues);
+	      if (ttl != null) {
+		      event.ttl(ttl);
+	      }
+	      if (state != null) {
+		      event.state(state);
+	      }
+	      if (description != null) {
+		      event.description(description);
+	      }
+	      event.send();
       } else {
         reconnectClient();
       }
